@@ -15,7 +15,6 @@ pub struct Ld19Point {
 
 impl Ld19Point {
     pub fn from_bytes(cursor: &mut Cursor<BytesMut>) -> Self {
-        // let mut cursor = Cursor::new(src);
         Ld19Point {
             distance: cursor.read_u16::<LittleEndian>().unwrap(),
             intensity: cursor.read_u8().unwrap(),
@@ -123,7 +122,6 @@ impl Decoder for Ld19Codec {
         if let Some(start_pos) = start_pos {
             // enough data for a full packet?
             if src.as_ref().len() - start_pos > PKG_SIZE {
-                // src.split_off(at)
                 let packet_data = &src.as_ref()[start_pos..start_pos + PKG_SIZE];
 
                 // check crc

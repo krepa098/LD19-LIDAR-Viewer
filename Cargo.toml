@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.38.0", features = ["full"] }
-eframe = "0.28.1"
-tokio-serial = "5.4.4"
 tokio-util = { version = "0.7.11", features = ["codec"] }
+tokio-serial = "5.4.4"
 futures = "0.3.30"
-byteorder = "1.5.0"
+eframe = "0.28.1"
 egui_plot = "0.28.1"
+byteorder = "1.5.0"
