@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use ::futures::StreamExt;
-use eframe::egui::{ComboBox, Slider, Vec2b};
+use eframe::egui::{Color32, ComboBox, Slider, Vec2b};
 use eframe::{egui, CreationContext};
-use egui_plot::{Arrows, PlotPoints, Points};
+use egui_plot::{Arrows, CoordinatesFormatter, PlotItem, PlotPoints, Points};
 use ld19codec::{Ld19Packet, Ld19Point};
 use tokio::runtime;
 
@@ -166,12 +166,20 @@ impl eframe::App for ViewerApp {
                 .allow_drag(true)
                 .allow_scroll(false)
                 .auto_bounds(Vec2b::new(false, false))
+                .coordinates_formatter(
+                    egui_plot::Corner::LeftBottom,
+                    CoordinatesFormatter::new(|p, _| {
+                        let d = (p.x * p.x + p.y * p.y).sqrt();
+                        let ang = p.x.atan2(p.y).to_degrees();
+                        format!("d={:.2}m θ={:.2}°", d, ang)
+                    }),
+                )
                 .show(ui, |plot_ui| {
                     let points: Vec<_> = self
                         .lidar_points
                         .iter()
                         .map(|p| {
-                            let rad = p.angle / 180.0 * std::f32::consts::PI;
+                            let rad = p.angle.to_radians();
 
                             // align +y with the forward direction of the sensor
                             let x = rad.sin() * p.point.distance_in_meters();
@@ -181,12 +189,15 @@ impl eframe::App for ViewerApp {
                         })
                         .collect();
 
-                    let plot_points = Points::new(points).radius(2.5);
+                    let plot_points = Points::new(points).radius(2.5).color(Color32::GREEN);
                     plot_ui.points(plot_points);
-                    plot_ui.arrows(Arrows::new(
-                        PlotPoints::new(vec![[0.0, 0.0]]),
-                        PlotPoints::new(vec![[0.0, 1.0]]),
-                    ));
+                    plot_ui.arrows(
+                        Arrows::new(
+                            PlotPoints::new(vec![[0.0, 0.0]]),
+                            PlotPoints::new(vec![[0.0, 1.0]]),
+                        )
+                        .allow_hover(false),
+                    );
                 });
         });
     }
