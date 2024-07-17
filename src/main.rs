@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use ::futures::StreamExt;
-use eframe::egui::{Color32, ComboBox, Slider, Vec2b};
+use eframe::egui::{Color32, ComboBox, Slider, Vec2, Vec2b};
 use eframe::{egui, CreationContext};
-use egui_plot::{Arrows, CoordinatesFormatter, PlotItem, PlotPoints, Points};
+use egui_plot::{Arrows, CoordinatesFormatter, PlotPoints, Points};
 use ld19codec::{Ld19Packet, Ld19Point};
 use tokio::runtime;
 
@@ -50,7 +50,7 @@ impl ViewerApp {
                 .unwrap(),
             lidar_rx: None,
             lidar_points: vec![],
-            intensity_threshold: 0.5,
+            intensity_threshold: 0.1,
             fade_duration_ms: 100, // 10Hz
             serial_port: "".to_owned(),
             worker_handle: None,
@@ -61,8 +61,9 @@ impl ViewerApp {
 
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // egui::CentralPanel::default().show(ctx, |ui| {
         egui::SidePanel::left("options").show(ctx, |ui| {
+            ui.add_space(ui.spacing().item_spacing.y);
+            ui.spacing();
             ui.heading("Settings");
             ComboBox::from_label("Serial port")
                 .selected_text(self.serial_port.to_string())
@@ -87,7 +88,7 @@ impl eframe::App for ViewerApp {
 
                             let egui_ctx = ctx.clone();
 
-                            let (tx_stop, mut rx_stop) = tokio::sync::mpsc::channel(10);
+                            let (tx_stop, mut rx_stop) = tokio::sync::mpsc::channel(1);
                             self.stop_signal = Some(tx_stop);
 
                             self.worker_handle = Some(self.rt.spawn(async move {
@@ -127,9 +128,12 @@ impl eframe::App for ViewerApp {
                 });
 
             ui.add(
-                Slider::new(&mut self.intensity_threshold, 0.0..=1.0).text("Intensity threshold"),
+                Slider::new(&mut self.intensity_threshold, 0.0..=1.0).text("intensity threshold"),
             );
-            ui.add(Slider::new(&mut self.fade_duration_ms, 0..=500).text("Fade duration (ms)"));
+            ui.add(Slider::new(&mut self.fade_duration_ms, 0..=500).text("fade duration (ms)"))
+                .on_hover_ui(|ui| {
+                    ui.label("This is typically the angular frequency (100ms for the LD19)");
+                });
 
             // fetch new datapoints
             if let Some(lidar_rx) = self.lidar_rx.as_ref() {
@@ -161,44 +165,60 @@ impl eframe::App for ViewerApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui_plot::Plot::new("plot")
-                .allow_zoom(true)
-                .allow_drag(true)
-                .allow_scroll(false)
-                .auto_bounds(Vec2b::new(false, false))
-                .coordinates_formatter(
-                    egui_plot::Corner::LeftBottom,
-                    CoordinatesFormatter::new(|p, _| {
-                        let d = (p.x * p.x + p.y * p.y).sqrt();
-                        let ang = p.x.atan2(p.y).to_degrees();
-                        format!("d={:.2}m θ={:.2}°", d, ang)
-                    }),
-                )
-                .show(ui, |plot_ui| {
-                    let points: Vec<_> = self
-                        .lidar_points
-                        .iter()
-                        .map(|p| {
-                            let rad = p.angle.to_radians();
-
-                            // align +y with the forward direction of the sensor
-                            let x = rad.sin() * p.point.distance_in_meters();
-                            let y = rad.cos() * p.point.distance_in_meters();
-
-                            [x as f64, y as f64]
-                        })
-                        .collect();
-
-                    let plot_points = Points::new(points).radius(2.5).color(Color32::GREEN);
-                    plot_ui.points(plot_points);
-                    plot_ui.arrows(
-                        Arrows::new(
-                            PlotPoints::new(vec![[0.0, 0.0]]),
-                            PlotPoints::new(vec![[0.0, 1.0]]),
-                        )
-                        .allow_hover(false),
-                    );
+            if self.serial_port.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(ui.available_height() * 0.5);
+                    ui.heading("LIDAR not connected");
+                    ui.label("Connect your LIDAR device and select a serial port")
                 });
+            } else {
+                egui_plot::Plot::new("plot")
+                    .allow_zoom(true)
+                    .allow_drag(true)
+                    .allow_scroll(false)
+                    .auto_bounds(Vec2b::new(false, false))
+                    .x_axis_label("m")
+                    .y_axis_label("m")
+                    .data_aspect(1.0)
+                    .coordinates_formatter(
+                        egui_plot::Corner::LeftBottom,
+                        CoordinatesFormatter::new(|p, _| {
+                            let d = (p.x * p.x + p.y * p.y).sqrt();
+                            let ang = p.x.atan2(p.y).to_degrees();
+                            format!("d={:.2}m θ={:.2}°", d, ang)
+                        }),
+                    )
+                    .show(ui, |plot_ui| {
+                        let points: Vec<_> = self
+                            .lidar_points
+                            .iter()
+                            .map(|p| {
+                                let rad = p.angle.to_radians();
+
+                                // align +y with the forward direction of the sensor
+                                let x = rad.sin() * p.point.distance_in_meters();
+                                let y = rad.cos() * p.point.distance_in_meters();
+
+                                [x as f64, y as f64]
+                            })
+                            .collect();
+
+                        let plot_points = Points::new(points).radius(2.5).color(Color32::GREEN);
+                        plot_ui.points(plot_points);
+                        plot_ui.arrows(
+                            Arrows::new(
+                                PlotPoints::new(vec![[0.0, 0.0]]),
+                                PlotPoints::new(vec![[0.0, 1.0]]),
+                            )
+                            .allow_hover(false),
+                        );
+
+                        let plot_points = Points::new(vec![[0.0, 0.0]])
+                            .radius(10.0)
+                            .color(Color32::GOLD);
+                        plot_ui.points(plot_points);
+                    });
+            }
         });
     }
 }
