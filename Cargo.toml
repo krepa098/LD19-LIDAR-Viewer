@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.38.0", features = ["full"] }
+tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 tokio-serial = "5.4.4"
 futures = "0.3.30"
