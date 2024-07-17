@@ -30,7 +30,7 @@ impl Ld19Point {
     }
 }
 
-pub enum Ld19Result {
+pub enum Ld19Frame {
     Packet(Ld19Packet),
     CRCError,
 }
@@ -122,7 +122,7 @@ impl<'a> Iterator for Ld19PointIter<'a> {
 pub struct Ld19Codec {}
 
 impl Decoder for Ld19Codec {
-    type Item = Ld19Result;
+    type Item = Ld19Frame;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -145,13 +145,13 @@ impl Decoder for Ld19Codec {
                     let mut cursor = Cursor::new(data);
                     let packet = Ld19Packet::from_bytes(&mut cursor);
 
-                    return Ok(Some(Ld19Result::Packet(packet)));
+                    return Ok(Some(Ld19Frame::Packet(packet)));
                 } else {
                     println!("crc mismatch {}", src.len());
                     // crc mismatch
                     // clear previous including start_pos
                     let _ = src.split_to(start_pos + 1);
-                    return Ok(Some(Ld19Result::CRCError));
+                    return Ok(Some(Ld19Frame::CRCError));
                 }
             }
         } else {

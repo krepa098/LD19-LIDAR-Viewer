@@ -4,7 +4,7 @@ use ::futures::StreamExt;
 use eframe::egui::{Color32, ComboBox, Slider, Vec2, Vec2b};
 use eframe::{egui, CreationContext};
 use egui_plot::{Arrows, CoordinatesFormatter, PlotPoints, Points};
-use ld19codec::{Ld19Packet, Ld19Point, Ld19Result};
+use ld19codec::{Ld19Frame, Ld19Point};
 use tokio::runtime;
 
 use tokio_serial::SerialPortBuilderExt;
@@ -61,7 +61,7 @@ impl RollingAverage {
 
 struct ViewerApp {
     rt: runtime::Runtime,
-    lidar_rx: Option<std::sync::mpsc::Receiver<Ld19Result>>,
+    lidar_rx: Option<std::sync::mpsc::Receiver<Ld19Frame>>,
     lidar_points: Vec<LidarPoint>,
     intensity_threshold: f32,
     fade_duration_ms: u64,
@@ -198,9 +198,9 @@ impl eframe::App for ViewerApp {
 
             // fetch new datapoints
             if let Some(lidar_rx) = self.lidar_rx.as_ref() {
-                while let Ok(ld19result) = lidar_rx.try_recv() {
-                    match ld19result {
-                        Ld19Result::Packet(packet) => {
+                while let Ok(frame) = lidar_rx.try_recv() {
+                    match frame {
+                        Ld19Frame::Packet(packet) => {
                             let fade_dur = Duration::from_millis(self.fade_duration_ms);
 
                             for point_angle in packet.iter_points() {
@@ -263,7 +263,7 @@ impl eframe::App for ViewerApp {
                                     .unwrap_or_default(),
                             );
                         }
-                        Ld19Result::CRCError => self.stats.crc_errors += 1,
+                        Ld19Frame::CRCError => self.stats.crc_errors += 1,
                     }
                 }
             }
