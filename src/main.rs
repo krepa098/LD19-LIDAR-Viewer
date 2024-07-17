@@ -9,6 +9,7 @@ use tokio::runtime;
 
 use tokio_serial::SerialPortBuilderExt;
 use tokio_util::codec::Decoder;
+
 mod ld19codec;
 
 fn main() -> eframe::Result {
@@ -35,7 +36,7 @@ struct LidarPoint {
 #[derive(Debug, Default)]
 struct LidarStats {
     angular_resolution: RollingAverage,
-    angular_frequency: RollingAverage,
+    angular_rate: RollingAverage,
     sample_rate: RollingAverage,
     max_dist: RollingAverage,
     min_dist: RollingAverage,
@@ -131,6 +132,7 @@ impl eframe::App for ViewerApp {
                                 let port = tokio_serial::new(port, 230400)
                                     .stop_bits(tokio_serial::StopBits::One)
                                     .parity(tokio_serial::Parity::None)
+                                    .flow_control(tokio_serial::FlowControl::None)
                                     .open_native_async()
                                     .expect("Cannot open port");
 
@@ -186,7 +188,7 @@ impl eframe::App for ViewerApp {
                     ui.label(format!("{:.1}kHz", self.stats.sample_rate.get() * 1e-3));
                     ui.end_row();
                     ui.label("Angular rate");
-                    ui.label(format!("{:.1}Hz", self.stats.angular_frequency.get()));
+                    ui.label(format!("{:.1}Hz", self.stats.angular_rate.get()));
                     ui.end_row();
                     ui.label("Angular resolution");
                     ui.label(format!("{:.2}°", self.stats.angular_resolution.get()));
@@ -235,7 +237,7 @@ impl eframe::App for ViewerApp {
                                     self.stats.last_completed_rotation.unwrap_or(Instant::now()),
                                 );
                                 self.stats.last_completed_rotation = Some(Instant::now());
-                                self.stats.angular_frequency.push(dt.as_secs_f32().recip());
+                                self.stats.angular_rate.push(dt.as_secs_f32().recip());
                                 self.stats.sample_rate.push(
                                     dt.as_secs_f32().recip()
                                         * (360.0 / packet.delta_angle_per_point_deg()),
