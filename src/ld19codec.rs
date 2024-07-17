@@ -30,6 +30,11 @@ impl Ld19Point {
     }
 }
 
+pub enum Ld19Result {
+    Packet(Ld19Packet),
+    CRCError,
+}
+
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone)]
@@ -79,6 +84,10 @@ impl Ld19Packet {
         delta
     }
 
+    pub fn delta_angle_per_point_deg(&self) -> f32 {
+        self.delta_angle_deg() / self.point.len() as f32
+    }
+
     pub fn timestamp(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.timestamp as u64)
     }
@@ -113,7 +122,7 @@ impl<'a> Iterator for Ld19PointIter<'a> {
 pub struct Ld19Codec {}
 
 impl Decoder for Ld19Codec {
-    type Item = Ld19Packet;
+    type Item = Ld19Result;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -136,12 +145,13 @@ impl Decoder for Ld19Codec {
                     let mut cursor = Cursor::new(data);
                     let packet = Ld19Packet::from_bytes(&mut cursor);
 
-                    return Ok(Some(packet));
+                    return Ok(Some(Ld19Result::Packet(packet)));
                 } else {
                     println!("crc mismatch {}", src.len());
                     // crc mismatch
                     // clear previous including start_pos
                     let _ = src.split_to(start_pos + 1);
+                    return Ok(Some(Ld19Result::CRCError));
                 }
             }
         } else {

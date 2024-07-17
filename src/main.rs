@@ -4,7 +4,7 @@ use ::futures::StreamExt;
 use eframe::egui::{Color32, ComboBox, Slider, Vec2, Vec2b};
 use eframe::{egui, CreationContext};
 use egui_plot::{Arrows, CoordinatesFormatter, PlotPoints, Points};
-use ld19codec::{Ld19Packet, Ld19Point};
+use ld19codec::{Ld19Packet, Ld19Point, Ld19Result};
 use tokio::runtime;
 
 use tokio_serial::SerialPortBuilderExt;
@@ -30,15 +30,45 @@ struct LidarPoint {
     instant: Instant,
 }
 
+#[derive(Debug, Default)]
+struct LidarStats {
+    angular_resolution: RollingAverage,
+    angular_frequency: RollingAverage,
+    sample_rate: RollingAverage,
+    max_dist: RollingAverage,
+    min_dist: RollingAverage,
+    crc_errors: u32,
+    last_start_angle: f32,
+    last_completed_rotation: Option<Instant>,
+}
+
+#[derive(Debug, Default)]
+struct RollingAverage {
+    index: usize,
+    hist: [f32; 8],
+}
+
+impl RollingAverage {
+    fn push(&mut self, val: f32) {
+        self.hist[self.index] = val;
+        self.index = (self.index + 1) % self.hist.len();
+    }
+
+    fn get(&self) -> f32 {
+        self.hist.iter().sum::<f32>() / self.hist.len() as f32
+    }
+}
+
 struct ViewerApp {
     rt: runtime::Runtime,
-    lidar_rx: Option<std::sync::mpsc::Receiver<Ld19Packet>>,
+    lidar_rx: Option<std::sync::mpsc::Receiver<Ld19Result>>,
     lidar_points: Vec<LidarPoint>,
     intensity_threshold: f32,
     fade_duration_ms: u64,
     serial_port: String,
     worker_handle: Option<tokio::task::JoinHandle<()>>,
     stop_signal: Option<tokio::sync::mpsc::Sender<()>>,
+    stats: LidarStats,
 }
 
 impl ViewerApp {
@@ -55,6 +85,7 @@ impl ViewerApp {
             serial_port: "".to_owned(),
             worker_handle: None,
             stop_signal: None,
+            stats: Default::default(),
         }
     }
 }
@@ -62,6 +93,9 @@ impl ViewerApp {
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::left("options").show(ctx, |ui| {
+            ui.style_mut().spacing.item_spacing = Vec2::new(16.0, 16.0);
+            ui.style_mut().spacing.indent = 16.0;
+
             ui.add_space(ui.spacing().item_spacing.y);
             ui.spacing();
             ui.heading("Settings");
@@ -72,7 +106,7 @@ impl eframe::App for ViewerApp {
                         let resp =
                             ui.selectable_value(&mut self.serial_port, port.clone(), port.clone());
 
-                        if resp.clicked() {
+                        if resp.changed() {
                             // exit the worker task
                             if self.worker_handle.as_ref().is_some() {
                                 self.rt
@@ -103,9 +137,9 @@ impl eframe::App for ViewerApp {
 
                                 loop {
                                     tokio::select! {
-                                        Some(packet) = reader.next() => {
-                                            if let Ok(packet) = packet {
-                                                tx.send(packet).unwrap();
+                                        Some(frame) = reader.next() => {
+                                            if let Ok(result) = frame {
+                                                tx.send(result).unwrap();
                                                 egui_ctx.request_repaint();
                                             } else {
                                                 break;
@@ -118,11 +152,12 @@ impl eframe::App for ViewerApp {
                                     }
                                 }
 
-                                println!("exit");
+                                println!("exit worker");
                             }));
 
-                            // clear plot
+                            // clear plot and reset stats
                             self.lidar_points.clear();
+                            self.stats = Default::default();
                         }
                     }
                 });
@@ -135,31 +170,101 @@ impl eframe::App for ViewerApp {
                     ui.label("This is typically the angular frequency (100ms for the LD19)");
                 });
 
+            // stats ui
+            ui.separator();
+            ui.heading("Stats");
+            egui::Grid::new("stats")
+                .num_columns(2)
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("CRC errors");
+                    ui.label(format!("{}", self.stats.crc_errors));
+                    ui.end_row();
+                    ui.label("Sample rate");
+                    ui.label(format!("{:.1}kHz", self.stats.sample_rate.get() * 1e-3));
+                    ui.end_row();
+                    ui.label("Angular rate");
+                    ui.label(format!("{:.1}Hz", self.stats.angular_frequency.get()));
+                    ui.end_row();
+                    ui.label("Angular resolution");
+                    ui.label(format!("{:.2}°", self.stats.angular_resolution.get()));
+                    ui.end_row();
+                    ui.label("Min distance");
+                    ui.label(format!("{:.2}m", self.stats.min_dist.get()));
+                    ui.end_row();
+                    ui.label("Max distance");
+                    ui.label(format!("{:.2}m", self.stats.max_dist.get()));
+                });
+
             // fetch new datapoints
             if let Some(lidar_rx) = self.lidar_rx.as_ref() {
-                while let Ok(packet) = lidar_rx.try_recv() {
-                    let fade_dur = Duration::from_millis(self.fade_duration_ms);
+                while let Ok(ld19result) = lidar_rx.try_recv() {
+                    match ld19result {
+                        Ld19Result::Packet(packet) => {
+                            let fade_dur = Duration::from_millis(self.fade_duration_ms);
 
-                    for point_angle in packet.iter_points() {
-                        self.lidar_points.push(LidarPoint {
-                            point: *point_angle.1,
-                            angle: point_angle.0,
-                            instant: Instant::now(),
-                        });
+                            for point_angle in packet.iter_points() {
+                                self.lidar_points.push(LidarPoint {
+                                    point: *point_angle.1,
+                                    angle: point_angle.0,
+                                    instant: Instant::now(),
+                                });
+                            }
+
+                            // filter datapoints
+                            let points: Vec<_> = self
+                                .lidar_points
+                                .iter()
+                                .filter(|p| {
+                                    Instant::now().duration_since(p.instant) < fade_dur
+                                        && p.point.normalized_intensity() > self.intensity_threshold
+                                })
+                                .copied()
+                                .collect();
+
+                            self.lidar_points = points;
+
+                            // calculate stats
+                            self.stats
+                                .angular_resolution
+                                .push(packet.delta_angle_per_point_deg());
+                            if self.stats.last_start_angle > packet.start_angle_deg() {
+                                let dt = Instant::now().duration_since(
+                                    self.stats.last_completed_rotation.unwrap_or(Instant::now()),
+                                );
+                                self.stats.last_completed_rotation = Some(Instant::now());
+                                self.stats.angular_frequency.push(dt.as_secs_f32().recip());
+                                self.stats.sample_rate.push(
+                                    dt.as_secs_f32().recip()
+                                        * (360.0 / packet.delta_angle_per_point_deg()),
+                                );
+                            }
+                            self.stats.last_start_angle = packet.start_angle_deg();
+                            self.stats.max_dist.push(
+                                self.lidar_points
+                                    .iter()
+                                    .max_by(|a, b| {
+                                        a.point
+                                            .distance_in_meters()
+                                            .total_cmp(&b.point.distance_in_meters())
+                                    })
+                                    .map(|p| p.point.distance_in_meters())
+                                    .unwrap_or_default(),
+                            );
+                            self.stats.min_dist.push(
+                                self.lidar_points
+                                    .iter()
+                                    .min_by(|a, b| {
+                                        a.point
+                                            .distance_in_meters()
+                                            .total_cmp(&b.point.distance_in_meters())
+                                    })
+                                    .map(|p| p.point.distance_in_meters())
+                                    .unwrap_or_default(),
+                            );
+                        }
+                        Ld19Result::CRCError => self.stats.crc_errors += 1,
                     }
-
-                    // filter datapoints
-                    let points: Vec<_> = self
-                        .lidar_points
-                        .iter()
-                        .filter(|p| {
-                            Instant::now().duration_since(p.instant) < fade_dur
-                                && p.point.normalized_intensity() > self.intensity_threshold
-                        })
-                        .copied()
-                        .collect();
-
-                    self.lidar_points = points;
                 }
             }
         });
