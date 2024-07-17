@@ -179,9 +179,9 @@ impl eframe::App for ViewerApp {
                 });
 
             ui.add(
-                Slider::new(&mut self.intensity_threshold, 0.0..=1.0).text("intensity threshold"),
+                Slider::new(&mut self.intensity_threshold, 0.0..=1.0).text("Intensity threshold"),
             );
-            ui.add(Slider::new(&mut self.fade_duration_ms, 0..=500).text("fade duration (ms)"))
+            ui.add(Slider::new(&mut self.fade_duration_ms, 0..=500).text("Fade duration (ms)"))
                 .on_hover_ui(|ui| {
                     ui.label("This is typically the angular frequency (100ms for the LD19)");
                 });
