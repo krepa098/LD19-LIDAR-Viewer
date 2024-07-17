@@ -20,7 +20,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "LD19 Lidar Viewer",
+        "LD19 LIDAR Viewer",
         options,
         Box::new(|cc| Ok(Box::new(ViewerApp::new(cc)))),
     )
@@ -114,7 +114,7 @@ impl eframe::App for ViewerApp {
                             if self.worker_handle.as_ref().is_some() {
                                 self.rt
                                     .block_on(self.stop_signal.as_ref().unwrap().send(()))
-                                    .unwrap();
+                                    .ok();
                                 self.worker_handle = None;
                                 self.stop_signal = None;
                             }
