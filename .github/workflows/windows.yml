@@ -1,0 +1,27 @@
+name: windows build
+
+on:
+    push:
+        branches: [ master ]
+    pull_request:
+        branches: [ master ]
+    release:
+        types: [ published ]
+
+jobs:
+    build:
+        runs-on: windows-latest
+
+        steps:
+            - uses: actions/checkout@v4
+
+            # build exe
+            - name: exe
+              run: cargo build --release
+              working-directory: ${{ github.workspace }}
+            
+            # artifact
+            - uses: actions/upload-artifact@v4
+              with:
+                name: ld19-viewer.exe
+                path: ${{ github.workspace }}/target/release/ld19-viewer.exe
