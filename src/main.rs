@@ -96,6 +96,18 @@ impl ViewerApp {
 impl eframe::App for ViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::left("options").show(ctx, |ui| {
+            // device disconnected?
+            if self
+                .stop_signal
+                .as_ref()
+                .map(|p| p.is_closed())
+                .unwrap_or(false)
+            {
+                self.worker_handle = None;
+                self.stop_signal = None;
+                self.serial_port = String::new();
+            }
+
             ui.style_mut().spacing.item_spacing = Vec2::new(16.0, 16.0);
             ui.style_mut().spacing.indent = 16.0;
 
